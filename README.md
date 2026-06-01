@@ -1,57 +1,148 @@
 # ClaudeDoc — AI Document Quality Assurance Agent
 
-An AI-powered document QA system that automatically detects scanning artifacts,
-document defects, and quality issues in scanned PDFs and images.
+ClaudeDoc is an AI-powered document QA system that automatically inspects scanned
+PDFs and images for quality defects — missing pages, blank pages, skew, and folded
+corners — and produces a structured, page-by-page quality report with an overall
+quality score and an optional plain-English narrative.
 
-Built for document processing companies, archives, and enterprise scanning workflows.
-
----
-
-## Features
-
-| Detection Module | What It Finds |
-|---|---|
-| **Missing Pages** | Gaps in page number sequences, metadata mismatches |
-| **Folded Corners** | Triangular corner anomalies using OpenCV contour analysis |
-| **Blank Pages** | Near-blank pages by pixel density + std deviation |
-| **Scanner Artifacts** | Vertical/horizontal dirty-scanner lines using 4-condition cross-page algorithm |
-| **Foreign Objects** | Papers, bookmarks, hands blocking content (YOLOv8 + SAM) |
-| **Skew / Rotation** | Pages scanned at an angle, reports exact degrees |
-| **AI Report** | Professional plain-English QA narrative via Claude |
+It is built for **document-processing companies, archives, and enterprise scanning
+workflows** (e.g. high-volume production scanning), where large batches of scanned
+documents need automated quality control before being accepted into a repository.
 
 ---
 
-## Quick Start
+## What it does
+
+You upload a scanned PDF (or image). ClaudeDoc runs it through an asynchronous
+detection pipeline and returns a JSON report containing:
+
+- a **per-page list of detected issues** with severity, location, confidence, and a recommended action,
+- a **quality score** for every page and an **overall document score** (0–100),
+- a **summary** of critical / warning / info issues,
+- an optional **AI-generated narrative** summarising the document's condition.
+
+### Detection modules
+
+| Module | Status | What it finds |
+|---|---|---|
+| **Missing Pages** | ✅ Active | Gaps in printed page-number sequences (via the PDF text layer) and metadata page-count mismatches |
+| **Blank Pages** | ✅ Active | Near-empty pages, detected by pixel density + intensity standard deviation |
+| **Skew / Rotation** | ✅ Active | Pages scanned at an angle, with the estimated rotation in degrees |
+| **Folded Corners** | ✅ Active | Triangular corner folds, via OpenCV contour analysis |
+| **Foreign Objects** | 🚧 In development | Cards, IDs, receipts, slips, and other papers scanned *over* the page and hiding text. A custom detector is being trained — see [Roadmap](#roadmap). |
+| **Scanner Artifacts** | ⏸️ Disabled | Dirty-scanner streak lines. Present in the codebase but not wired into the pipeline (too many false positives on text). |
+
+> **Note:** The `foreign_object.py` and `scanner_artifact.py` detector modules exist
+> in the source tree but are **not** currently part of the live pipeline. Only the
+> four "Active" modules above run today.
+
+---
+
+## Architecture
+
+```
+┌──────────────┐     upload      ┌──────────────┐    enqueue     ┌──────────────┐
+│   Streamlit  │ ──────────────► │   FastAPI    │ ─────────────► │    Redis     │
+│   frontend   │ ◄────────────── │   backend    │ ◄───────────── │   (broker)   │
+└──────────────┘   poll status   └──────────────┘    results     └──────┬───────┘
+                                                                         │
+                                                                  ┌──────▼───────┐
+                                                                  │    Celery    │
+                                                                  │    worker    │  ← runs the QA pipeline
+                                                                  └──────────────┘
+```
+
+- **Backend:** FastAPI (REST API) + Celery (async job processing) + Redis (broker/result store)
+- **Document processing:** PyMuPDF (page rasterisation + text-layer extraction) and OpenCV (image analysis)
+- **Detectors:** pure-Python/OpenCV modules orchestrated by `DocumentQAPipeline`
+- **Report narrative:** Google Gemini API (optional; falls back to a templated summary if no key is set)
+- **Frontend:** Streamlit drag-and-drop UI with an issues table, copy-paste page list, and JSON download
+- **Deployment target:** optionally an AMD ROCm GPU host (e.g. DigitalOcean MI300X) for future GPU-accelerated detectors; the active detectors run fine on CPU
+
+### Project structure
+
+```
+ClaudeDoc/
+├── backend/
+│   └── app/
+│       ├── detectors/          # detection modules
+│       │   ├── blank_page.py        ✅ active
+│       │   ├── skew.py              ✅ active
+│       │   ├── folded_page.py       ✅ active
+│       │   ├── missing_page.py      ✅ active
+│       │   ├── foreign_object.py    🚧 in development
+│       │   └── scanner_artifact.py  ⏸️ disabled
+│       ├── services/
+│       │   ├── pipeline.py          # orchestrates the detectors → QAReport
+│       │   ├── pdf_processor.py     # PyMuPDF page extraction + metadata
+│       │   ├── annotator.py         # draws issue overlays on page thumbnails
+│       │   ├── quality_scorer.py    # per-page and document scoring
+│       │   └── report_generator.py  # Gemini narrative + (optional) PDF builder
+│       ├── models/schemas.py        # Pydantic report schema
+│       ├── api/routes.py            # FastAPI endpoints
+│       ├── worker.py                # Celery task definitions
+│       └── main.py                  # FastAPI app entry point
+├── frontend/app.py                  # Streamlit UI
+├── huggingface/app.py               # single-process entry point for HF Spaces
+├── config/settings.py               # centralised configuration / thresholds
+├── docker/                          # Dockerfiles (backend, worker, frontend)
+├── docker-compose.yml
+├── sample_docs/generate_samples.py  # generates synthetic test PDFs
+├── requirements.txt
+├── requirements-rocm.txt            # AMD ROCm GPU variant of dependencies
+└── .env.example
+```
+
+---
+
+## Installation
+
+### Prerequisites
+
+- **Python 3.10+**
+- **Redis** (for Celery broker/result backend)
+- A **Google Gemini API key** *(optional — only needed for the AI narrative; without it, a templated summary is used)*
 
 ### Option A — Docker (recommended)
 
 ```bash
-cp .env.example .env
-# Edit .env and set ANTHROPIC_API_KEY
+git clone https://github.com/Suyashspidy/ClaudeDoc.git
+cd ClaudeDoc
 
+# 1. Create your environment file
+cp .env.example .env
+# Edit .env and set GOOGLE_API_KEY (optional but recommended)
+
+# 2. Build and start all services (backend + worker + Redis + frontend)
 docker-compose up --build
 ```
 
-- **Frontend:** http://localhost:8501
-- **API docs:** http://localhost:8000/docs
-- **API base:** http://localhost:8000/api/v1
+Then open:
+
+- **Frontend (Streamlit):** http://localhost:8501
+- **API docs (Swagger):** http://localhost:8000/docs
+- **API base URL:** http://localhost:8000/api/v1
 
 ### Option B — Local (without Docker)
 
-**Prerequisites:** Python 3.10+, Redis running on `localhost:6379`, Tesseract OCR
-
 ```bash
+git clone https://github.com/Suyashspidy/ClaudeDoc.git
+cd ClaudeDoc
+
 # 1. Install dependencies
 pip install -r requirements.txt
-
-# For AMD GPU (ROCm):
-pip install -r requirements-rocm.txt
+#   For AMD ROCm GPU hosts, use the ROCm variant instead:
+#   pip install -r requirements-rocm.txt
 
 # 2. Environment
 cp .env.example .env
-# Set ANTHROPIC_API_KEY in .env
+#   Set GOOGLE_API_KEY in .env (optional)
 
-# 3. Start services (4 terminals)
+# 3. Make sure Redis is running on localhost:6379
+#    (e.g. `redis-server`, or via Docker: `docker run -p 6379:6379 redis`)
+
+# 4. Start the services (each in its own terminal)
+
 # Terminal 1 — API
 uvicorn backend.app.main:app --reload --port 8000
 
@@ -61,43 +152,52 @@ celery -A backend.app.worker.celery_app worker --loglevel=info
 # Terminal 3 — Streamlit frontend
 streamlit run frontend/app.py
 
-# Terminal 4 — Generate sample test docs (optional)
+# (optional) Terminal 4 — generate synthetic test documents
 python sample_docs/generate_samples.py
 ```
 
----
-
-## AMD GPU Acceleration
-
-The pipeline uses ROCm + PyTorch for GPU-accelerated inference:
-
-- **YOLOv8** foreign object detection runs on AMD GPU
-- **SAM** segmentation runs on AMD GPU
-- Set `USE_GPU=true` in `.env` and use `docker-compose.yml` which mounts `/dev/kfd` and `/dev/dri`
-
-```bash
-# Verify ROCm is detected
-python -c "import torch; print(torch.cuda.is_available())"  # True with ROCm
-```
+> **Windows note:** the frontend's API base URL is set at the top of
+> `frontend/app.py` (`API_BASE`). Point it at `http://localhost:8000/api/v1` for a
+> local run, or at your remote backend's address.
 
 ---
 
-## API Reference
+## Configuration
 
-```
-POST   /api/v1/upload                          Upload PDF/image for processing
-GET    /api/v1/status/{job_id}                 Poll job progress (0-100%)
-GET    /api/v1/report/{job_id}                 Full JSON QA report
-GET    /api/v1/report/{job_id}/pdf             Download PDF report
-GET    /api/v1/report/{job_id}/page/{page_num} Annotated page thumbnail
-DELETE /api/v1/job/{job_id}                    Clean up job files
-```
+All settings live in `config/settings.py` and can be overridden via environment
+variables in `.env`. The most relevant ones:
 
-Interactive Swagger docs: http://localhost:8000/docs
+| Variable | Default | Description |
+|---|---|---|
+| `GOOGLE_API_KEY` | — | Google Gemini API key for the AI narrative *(optional)* |
+| `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model used for report narration |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
+| `CELERY_BROKER` | `redis://localhost:6379/0` | Celery broker URL |
+| `CELERY_BACKEND` | `redis://localhost:6379/1` | Celery result backend URL |
+| `USE_GPU` | `true` | Enable AMD ROCm GPU acceleration (for future GPU detectors) |
+| `ROCM_VISIBLE_DEVICES` | `0` | Which ROCm device to use |
+| `MAX_UPLOAD_SIZE_MB` | `200` | Maximum upload size |
+| `BLANK_PAGE_PIXEL_DENSITY_THRESHOLD` | `0.02` | Dark-pixel fraction below which a page is blank |
+| `SKEW_THRESHOLD_DEGREES` | `2.0` | Minimum skew angle to flag |
 
 ---
 
-## QA Report Schema
+## API reference
+
+Base path: `/api/v1`
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/upload` | Upload a PDF/image; returns a `job_id` |
+| `GET` | `/status/{job_id}` | Poll job progress (0–100%) and state |
+| `GET` | `/report/{job_id}` | Full JSON QA report |
+| `GET` | `/report/{job_id}/pdf` | Download a PDF report (if generated) |
+| `GET` | `/report/{job_id}/page/{page_num}` | Annotated page thumbnail |
+| `DELETE` | `/job/{job_id}` | Delete a job and its files |
+
+Interactive Swagger docs: **http://localhost:8000/docs**
+
+### QA report schema (abridged)
 
 ```json
 {
@@ -121,101 +221,33 @@ Interactive Swagger docs: http://localhost:8000/docs
         }
       ]
     }
-  ],
-  "scanner_health": {
-    "artifact_detected": true,
-    "affected_pages": [10, 11, 12],
-    "cleaning_recommended": true,
-    "artifact_positions": [{"orientation": "vertical", "position": 350}]
-  },
-  "ai_narrative": "This document presents moderate quality concerns..."
+  ]
 }
 ```
 
 ---
 
-## Sample Test Documents
-
-```bash
-python sample_docs/generate_samples.py
-```
-
-Generates:
-
-| File | Tests |
-|---|---|
-| `test_missing_pages_5_6.pdf` | Missing page detection (pages 5-6 absent) |
-| `test_folded_corner_page3.pdf` | Folded bottom-right corner on page 3 |
-| `test_scanner_artifact_pages10_15.pdf` | Vertical artifact on pages 10-15 |
-| `test_foreign_object_page8.pdf` | Bookmark blocking 20% of page 8 |
-| `test_perfect_document.pdf` | Clean document (expected score: 100) |
-
----
-
-## Running Tests
+## Running tests
 
 ```bash
 pytest backend/tests/ -v
 ```
 
-Test coverage:
-- Blank page detection (5 tests)
-- Skew detection (4 tests)
-- Scanner artifact cross-page analysis (3 tests)
-- Folded page detection (4 tests)
-- Missing page / sequence gap analysis (6 tests)
-- Quality scoring functions (7 tests)
+Covers blank-page, skew, folded-page, missing-page, scanner-artifact, and
+quality-scoring logic.
 
 ---
 
-## Project Structure
+## Roadmap
 
-```
-ClaudeDoc/
-├── backend/
-│   └── app/
-│       ├── detectors/         # 6 detection modules
-│       │   ├── blank_page.py
-│       │   ├── folded_page.py
-│       │   ├── foreign_object.py
-│       │   ├── missing_page.py
-│       │   ├── scanner_artifact.py
-│       │   └── skew.py
-│       ├── services/
-│       │   ├── pipeline.py        # Main QA pipeline orchestrator
-│       │   ├── pdf_processor.py   # PyMuPDF page extraction
-│       │   ├── annotator.py       # Bounding box overlays
-│       │   ├── quality_scorer.py  # Score calculation
-│       │   └── report_generator.py # Claude API + PDF reports
-│       ├── models/schemas.py      # Pydantic data models
-│       ├── api/routes.py          # FastAPI endpoints
-│       ├── worker.py              # Celery task definitions
-│       └── main.py                # FastAPI app entry point
-├── frontend/app.py                # Streamlit UI
-├── config/settings.py             # Centralised configuration
-├── docker/                        # Dockerfiles (API, worker, frontend)
-├── docker-compose.yml
-├── sample_docs/generate_samples.py
-├── .github/workflows/ci.yml
-├── requirements.txt
-├── requirements-rocm.txt          # AMD ROCm GPU variant
-└── .env.example
-```
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | — | **Required.** Claude API key |
-| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Claude model for report generation |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
-| `USE_GPU` | `true` | Enable AMD ROCm GPU acceleration |
-| `BLANK_PAGE_PIXEL_DENSITY_THRESHOLD` | `0.02` | Fraction of dark pixels below which page is blank |
-| `SKEW_THRESHOLD_DEGREES` | `2.0` | Minimum skew angle to flag |
-| `YOLO_CONFIDENCE_THRESHOLD` | `0.70` | YOLO detection confidence cutoff |
-| `ARTIFACT_CONDITIONS_REQUIRED` | `3` | Conditions needed to classify line as artifact |
+- **Foreign-object detection** — train a custom object detector to flag cards, IDs,
+  receipts, slips, bills, and other papers scanned *over* a page and hiding text.
+  This targets enterprise scanning workflows where such objects are accidentally
+  captured. Work in progress.
+- Validate the blank-page, skew, and folded-corner detectors against real defective
+  scans.
+- Re-evaluate scanner-artifact detection with a more precise, lower-false-positive
+  algorithm.
 
 ---
 
