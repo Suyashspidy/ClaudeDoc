@@ -1,0 +1,36 @@
+# ── AMD ROCm base image for GPU acceleration ──────────────────────────────────
+FROM rocm/pytorch:rocm7.0_ubuntu22.04_py3.10_pytorch_2.6.0
+
+WORKDIR /app
+
+# System dependencies for OpenCV and Tesseract
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python dependencies (ROCm PyTorch already installed in base image)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/rocm7.0
+
+# Application code
+COPY backend/ ./backend/
+COPY config/ ./config/
+COPY .env .env
+
+# Create storage directories
+RUN mkdir -p uploads reports cache
+
+ENV PYTHONPATH=/app
+# MI300X (gfx942/CDNA3) is natively supported in ROCm 6.0+ — no GFX override needed
+
+EXPOSE 8000
+
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

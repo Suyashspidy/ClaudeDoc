@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Install CPU-only dependencies (CI)
+        run: |
+          pip install --upgrade pip
+          # Install CPU PyTorch for CI (no ROCm in GitHub Actions)
+          pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check backend/ config/ frontend/
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy
+          mypy backend/app --ignore-missing-imports --no-strict-optional
+        continue-on-error: true
+
+      - name: Run unit tests
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          USE_GPU: "false"
+        run: |
+          pytest backend/tests/ -v --tb=short --timeout=60
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image (CPU variant for CI)
+        run: |
+          docker build -f docker/Dockerfile.backend \
+            --build-arg BASE_IMAGE=python:3.10-slim \
+            -t claudedoc-api:${{ github.sha }} .
+
+      - name: Build frontend image
+        run: |
+          docker build -f docker/Dockerfile.frontend -t claudedoc-frontend:${{ github.sha }} .

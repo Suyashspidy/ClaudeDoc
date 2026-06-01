@@ -1,0 +1,5 @@
+# AMD ROCm GPU build — install INSTEAD of standard torch/torchvision from requirements.txt
+# See: https://pytorch.org/get-started/locally/ (select ROCm)
+--extra-index-url https://download.pytorch.org/whl/rocm6.2
+torch==2.9.1+rocm6.2
+torchvision==0.24.1+rocm6.2
