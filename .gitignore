@@ -10,3 +10,6 @@ dist/
 build/
 .venv/
 venv/
+
+# Large datasets (kept local, not pushed)
+Data/
