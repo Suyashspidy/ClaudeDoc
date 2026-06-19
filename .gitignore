@@ -16,3 +16,6 @@ Data/
 
 # Generated test PDFs (reproducible via sample_docs/generate_samples.py)
 sample_docs/*.pdf
+
+# Local ad-hoc test documents
+Test/
