@@ -12,6 +12,7 @@ from ..detectors import (
     SkewDetector,
     FoldedPageDetector,
     MissingPageDetector,
+    ForeignObjectClassifierDetector,
 )
 from ..models.schemas import (
     IssuesSummary, PageReport, QAReport, ScannerHealth, Severity,
@@ -35,6 +36,7 @@ class DocumentQAPipeline:
         self._skew = SkewDetector()
         self._fold = FoldedPageDetector()
         self._missing = MissingPageDetector()
+        self._foreign = ForeignObjectClassifierDetector()
 
     def run(
         self,
@@ -75,6 +77,7 @@ class DocumentQAPipeline:
             page_issues[page_num] += self._blank._safe_detect(img, page_num)
             page_issues[page_num] += self._skew._safe_detect(img, page_num)
             page_issues[page_num] += self._fold._safe_detect(img, page_num)
+            page_issues[page_num] += self._foreign._safe_detect(img, page_num)
 
         # ---- Missing page detection ----
         _progress(90, "Checking for missing pages…")

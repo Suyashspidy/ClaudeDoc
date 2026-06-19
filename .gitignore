@@ -13,3 +13,6 @@ venv/
 
 # Large datasets (kept local, not pushed)
 Data/
+
+# Generated test PDFs (reproducible via sample_docs/generate_samples.py)
+sample_docs/*.pdf
