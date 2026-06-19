@@ -54,10 +54,14 @@ class Settings(BaseSettings):
     yolo_confidence_threshold: float = 0.70
     foreign_object_critical_coverage: float = 0.05   # > 5% = critical
     foreign_object_warning_coverage: float = 0.01    # 1-5% = warning
+    # Fine-tuned EfficientNetV2-S classifier (pipeline/fo_classifier_effv2s.pt).
+    enable_foreign_object_classifier: bool = True
+    fo_classifier_path: str = ""                     # blank = use pipeline/ checkpoint
 
     # ---- Folded Page Detection ----
     fold_triangle_area_min: int = 500               # min px² for fold triangle
     fold_corner_search_ratio: float = 0.15          # search in outer 15% of corners
+    fold_deviation_threshold: int = 50              # min |intensity - page_bg| for a fold pixel
 
     # ---- Missing Page Detection ----
     page_number_confidence_threshold: float = 0.6

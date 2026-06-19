@@ -34,11 +34,14 @@ class TestMissingPageDetector:
         assert issues == []
 
     def test_sequence_gap_detected(self):
-        # Physical pages 1-4 with detected numbers 1,2,5,6 (pages 3,4 missing)
-        page_numbers = {1: 1, 2: 2, 3: 5, 4: 6}
+        # Physical pages 1-5 with detected numbers 1,2,3,6,7 (printed pages 4,5 missing).
+        # detect_sequence_gaps needs >=5 numbered pages and returns
+        # (physical_page_after_gap, PageIssue) tuples.
+        page_numbers = {1: 1, 2: 2, 3: 3, 4: 6, 5: 7}
         issues = self.detector.detect_sequence_gaps(page_numbers)
         assert len(issues) == 1
-        assert "3" in issues[0].description or "4" in issues[0].description
+        _phys, issue = issues[0]
+        assert "4" in issue.description or "5" in issue.description
 
     def test_no_gap_in_complete_sequence(self):
         page_numbers = {1: 1, 2: 2, 3: 3, 4: 4}
@@ -50,5 +53,6 @@ class TestMissingPageDetector:
         page_numbers = {1: 1, 2: 2, 3: 3, 4: 4, 5: 7, 6: 8}
         issues = self.detector.detect_sequence_gaps(page_numbers)
         assert len(issues) == 1
-        description = issues[0].description
+        _phys, issue = issues[0]
+        description = issue.description
         assert "5" in description and "6" in description

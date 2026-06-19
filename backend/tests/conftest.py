@@ -37,7 +37,11 @@ def _make_page_with_vertical_artifact(
 
 
 def _make_page_with_folded_corner(corner: str = "bottom-right") -> np.ndarray:
-    """Page with a white triangle in one corner simulating a fold."""
+    """Page with a dark shadow triangle in one corner simulating a real fold.
+
+    A folded corner casts a shadow / reveals the darker page back, so it reads as a
+    triangular region markedly darker than the page background — not a white wedge.
+    """
     img = _make_page_with_text()
     h, w = img.shape[:2]
     corner_size = int(min(h, w) * 0.12)
@@ -49,7 +53,7 @@ def _make_page_with_folded_corner(corner: str = "bottom-right") -> np.ndarray:
         "bottom-right": np.array([[w, h], [w - corner_size, h], [w, h - corner_size]]),
     }
     pts = corners_pts[corner]
-    cv2.fillPoly(img, [pts], (255, 255, 255))
+    cv2.fillPoly(img, [pts], (70, 70, 70))
     return img
 
 

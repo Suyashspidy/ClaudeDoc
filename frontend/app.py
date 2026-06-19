@@ -1,12 +1,15 @@
 """Streamlit frontend for the ClaudeDoc QA Agent."""
 from __future__ import annotations
 import json
+import os
 import time
 
 import requests
 import streamlit as st
 
-API_BASE = "http://165.245.143.135:8000/api/v1"
+# Configurable so the same frontend can target a local run or the remote backend.
+# docker-compose already passes API_BASE as an env var; honour it here.
+API_BASE = os.environ.get("API_BASE", "http://165.245.143.135:8000/api/v1")
 
 st.set_page_config(
     page_title="ClaudeDoc — Book Scan QA",
