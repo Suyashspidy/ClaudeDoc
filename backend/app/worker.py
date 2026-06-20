@@ -5,6 +5,9 @@ import logging
 from pathlib import Path
 
 import numpy as np
+from celery import Celery
+
+from config.settings import settings
 
 
 class _NumpyEncoder(json.JSONEncoder):
@@ -17,8 +20,6 @@ class _NumpyEncoder(json.JSONEncoder):
             return obj.tolist()
         return super().default(obj)
 
-from celery import Celery
-from config.settings import settings
 
 logger = logging.getLogger(__name__)
 

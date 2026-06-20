@@ -3,8 +3,6 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import numpy as np
-import pytest
 
 from backend.app.detectors.skew import SkewDetector
 from backend.app.models.schemas import IssueType

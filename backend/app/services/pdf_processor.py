@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Tuple
+from typing import Dict, Iterator, Tuple
 import numpy as np
 
 logger = logging.getLogger(__name__)

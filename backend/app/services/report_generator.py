@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 
 from ..models.schemas import QAReport, PageReport, Severity

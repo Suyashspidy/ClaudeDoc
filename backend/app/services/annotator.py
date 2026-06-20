@@ -1,7 +1,7 @@
 """Annotates page images with bounding boxes and severity overlays for the QA report."""
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 import numpy as np
 import cv2
 

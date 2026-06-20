@@ -7,7 +7,6 @@ import cv2
 
 from .base import BaseDetector
 from ..models.schemas import PageIssue, IssueType, Severity
-from config.settings import settings
 
 
 _PAGE_NUMBER_PATTERN = re.compile(

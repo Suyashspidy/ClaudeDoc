@@ -1,7 +1,7 @@
 """Foreign object detector — uses YOLOv8 + SAM to detect objects blocking page content."""
 from __future__ import annotations
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import numpy as np
 import cv2
 
