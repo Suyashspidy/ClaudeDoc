@@ -55,10 +55,11 @@ class Settings(BaseSettings):
     foreign_object_critical_coverage: float = 0.05   # > 5% = critical
     foreign_object_warning_coverage: float = 0.01    # 1-5% = warning
     # Fine-tuned EfficientNetV2-S classifier (pipeline/fo_classifier_effv2s.pt).
-    # DISABLED: the current checkpoint overfits to its 6 training books and
-    # false-positives (P(bad)=1.0) on unseen scanned books. Needs retraining on a
-    # much more diverse 'good' base set before it can be re-enabled. See memory.
-    enable_foreign_object_classifier: bool = False
+    # ENABLED (2026-06-20): retrained on 58 diverse scanned books with a BOOK-level
+    # train/val/test split, fixing the earlier overfit. Generalizes to unseen books
+    # (held-out-book test recall 0.993 / prec 0.999; unseen clean book went from
+    # 508/509 false-flags to 1). Threshold bumped to 0.70 in the checkpoint. See memory.
+    enable_foreign_object_classifier: bool = True
     fo_classifier_path: str = ""                     # blank = use pipeline/ checkpoint
 
     # ---- Folded Page Detection ----
