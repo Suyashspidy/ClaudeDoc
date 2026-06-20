@@ -115,7 +115,9 @@ class ForeignObjectClassifierDetector(BaseDetector):
             return []
 
         # Tuned to minimise false negatives — a flagged page should be rescanned.
-        severity = Severity.critical if prob >= 0.6 else Severity.warning
+        # Severity scales above the decision threshold: a confident detection is
+        # critical, a borderline one (just over threshold) is a warning.
+        severity = Severity.critical if prob >= model.threshold + 0.15 else Severity.warning
         return [PageIssue(
             type=IssueType.foreign_object,
             severity=severity,

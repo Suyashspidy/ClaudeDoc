@@ -9,7 +9,7 @@ pydantic-settings>=2.7.0
 PyMuPDF>=1.24.11
 opencv-python-headless>=4.10.0.84
 Pillow>=12.2.0
-numpy>=2.4.0
+numpy>=2.2.0  # 2.4+ needs Python >=3.11; CI/Docker target 3.10, so allow 2.2.x there
 
 # ── AI / ML ───────────────────────────────────────────────────────────────────
 google-generativeai==0.8.3

@@ -20,8 +20,10 @@ Usage:
 """
 import argparse
 import hashlib
+import os
 import random
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import fitz
@@ -37,6 +39,7 @@ DATASET = ROOT / "_dataset"
 TARGET_LONG = 1100           # longer side of cached base page (px)
 INK_MIN, INK_MAX = 0.02, 0.35  # keep pages whose dark-pixel fraction is in this band
 N_PER_CLASS = 4000           # good and bad each (full run)
+MAX_KEPT_PER_BOOK = 150      # cap pages per book so no single book dominates
 SPLITS = {"train": 0.70, "val": 0.15, "test": 0.15}
 SEED = 1234
 
@@ -69,7 +72,10 @@ def build_page_cache() -> list[Path]:
     kept, skipped = [], 0
     for pdf in sorted(BASE_SRC.glob("*.pdf")):
         doc = fitz.open(pdf)
+        kept_this = 0
         for pno in range(len(doc)):
+            if kept_this >= MAX_KEPT_PER_BOOK:
+                break
             img = render_page(doc[pno])
             if not (INK_MIN < ink_fraction(img) < INK_MAX):
                 skipped += 1
@@ -77,8 +83,9 @@ def build_page_cache() -> list[Path]:
             out = PAGE_CACHE / f"{pdf.stem}__p{pno:04d}.jpg"
             img.save(out, quality=90)
             kept.append(out)
+            kept_this += 1
         doc.close()
-        print(f"  cached {pdf.stem}: running total {len(kept)} kept")
+        print(f"  cached {pdf.stem}: {kept_this} kept (running total {len(kept)})")
     print(f"page cache built: {len(kept)} kept, {skipped} skipped (blank/plate)")
     return sorted(kept)
 
@@ -94,10 +101,18 @@ def assign_split(key: str) -> str:
     return "test"
 
 
+def book_of(page_path: Path) -> str:
+    """Book stem from a cached page filename '<book>__p0000.jpg'."""
+    return page_path.name.split("__p")[0]
+
+
 def build_pools():
     pages = defaultdict(list)
     for p in build_page_cache():
-        pages[assign_split(p.name)].append(p)
+        # Split by BOOK, not by page: every page of a book lands in the same split,
+        # so val/test books are never seen in training. This is the honest eval that
+        # the old page-level split lacked (which let the model memorise books).
+        pages[assign_split(f"book:{book_of(p)}")].append(p)
     # objects stratified by category so every split has every category
     objs = {s: defaultdict(list) for s in SPLITS}
     for cat_dir in sorted(OBJ_DIR.iterdir()):
@@ -191,36 +206,61 @@ def preview(pages, objs, n=24):
 
 
 # ---------------------------------------------------------------- full gen
-def generate(pages, objs):
+# Worker functions live at module level so they are picklable for the process pool
+# (Windows uses 'spawn', which re-imports this module in each worker).
+def _save_good(task) -> None:
+    split, i, page_path = task
+    out = DATASET / split / "good" / f"{split}_good_{i:05d}.jpg"
+    Image.open(page_path).convert("RGB").save(out, quality=88)
+
+
+def _save_bad(task) -> None:
+    split, i, page_path, obj_path, seed = task
+    rng = random.Random(seed)  # per-task RNG -> deterministic and pool-safe
+    comp = composite(Image.open(page_path), Path(obj_path), rng)
+    cat = Path(obj_path).parent.name
+    out = DATASET / split / "bad" / f"{split}_bad_{i:05d}_{cat}.jpg"
+    comp.save(out, quality=88)
+
+
+def generate(pages, objs, workers=None):
     """Balanced 1:1 per split: every unique page once as `good`, an equal number
     of composites as `bad`. No exact-duplicate good images; augmentation is left
-    to the training loader."""
+    to the training loader.
+
+    Compositing is embarrassingly parallel, so the per-image work is dispatched to
+    a process pool. Page/object/seed for each `bad` image are pre-picked here with
+    the master RNG, so the dataset stays fully deterministic for a given SEED
+    regardless of worker count."""
+    workers = workers or os.cpu_count() or 1
     rng = random.Random(SEED)
     for split in SPLITS:
         sp_pages = pages[split]
         sp_cats = [c for c in objs[split] if objs[split][c]]
-        good_dir = DATASET / split / "good"
-        bad_dir = DATASET / split / "bad"
-        good_dir.mkdir(parents=True, exist_ok=True)
-        bad_dir.mkdir(parents=True, exist_ok=True)
-        # good: each unique page saved once
-        for i, p in enumerate(sp_pages):
-            Image.open(p).convert("RGB").save(
-                good_dir / f"{split}_good_{i:05d}.jpg", quality=88)
-        # bad: equal count, random page x random (stratified) object
+        (DATASET / split / "good").mkdir(parents=True, exist_ok=True)
+        (DATASET / split / "bad").mkdir(parents=True, exist_ok=True)
+
+        good_tasks = [(split, i, str(p)) for i, p in enumerate(sp_pages)]
+        bad_tasks = []
         for i in range(len(sp_pages)):
             cat = rng.choice(sp_cats)
             obj = rng.choice(objs[split][cat])
-            comp = composite(Image.open(rng.choice(sp_pages)), obj, rng)
-            comp.save(bad_dir / f"{split}_bad_{i:05d}_{cat}.jpg", quality=88)
+            page = rng.choice(sp_pages)
+            bad_tasks.append((split, i, str(page), str(obj), rng.randrange(2**31)))
+
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(_save_good, good_tasks, chunksize=8))
+            list(ex.map(_save_bad, bad_tasks, chunksize=8))
         print(f"  {split}: {len(sp_pages)} good + {len(sp_pages)} bad "
               f"(objcats={len(sp_cats)})")
-    print(f"\nDataset -> {DATASET}")
+    print(f"\nDataset -> {DATASET}  ({workers} workers)")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--workers", type=int, default=None,
+                    help="composite worker processes (default: all CPU cores)")
     args = ap.parse_args()
     pages, objs = build_pools()
     print("split sizes (pages):", {s: len(pages[s]) for s in SPLITS})
@@ -228,7 +268,7 @@ def main():
     if args.preview:
         preview(pages, objs)
     else:
-        generate(pages, objs)
+        generate(pages, objs, workers=args.workers)
 
 
 if __name__ == "__main__":
